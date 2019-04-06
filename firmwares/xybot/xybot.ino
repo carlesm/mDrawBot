@@ -21,10 +21,8 @@ static union{
 
 // arduino only handle A,B step mapping
 float curSpd,tarSpd; // speed profile
-float curX,curY,curZ;
-float tarX,tarY,tarZ; // target xyz position
 // step value
-int tarA,tarB,posA,posB; // target stepper position
+int posA,posB; // target stepper position
 int8_t motorAfw,motorAbk;
 int8_t motorBfw,motorBbk;
 
@@ -79,7 +77,7 @@ int stepdelay_max=1000;
 #define SEGMENT_DISTANCE 10 // 1 mm for each segment
 #define SPEED_STEP 1
 
-void doMove()
+void doMove(long tarA, long tarB)
 {
   long mDelay=stepdelay_max;
   long temp_delay;
@@ -159,22 +157,32 @@ void doMove()
 #define WIDTH 380
 #define HEIGHT 310
 #define DIAMETER 11 // the diameter of stepper wheel
-//#define STEPS_PER_MM (STEPS_PER_CIRCLE/PI/DIAMETER) 
+//#define STEPS_PER_MM (STEPS_PER_CIRCLE/PI/DIAMETER)
 #define STEPS_PER_MM 87.58 // the same as 3d printer
-void prepareMove()
+
+long mm2steps(float a) {
+  return a*STEPS_PER_MM;
+}
+float steps2mm(long a) {
+  return a/STEPS_PER_MM;
+}
+void prepareMove(float tarX, float tarY)
 {
+  static float curX = 0;
+  static float curY = 0;
+  long tarA = mm2steps(tarX);
+  long tarB = mm2steps(tarY);
+  //Serial.print("tarL:");Serial.print(tarL);Serial.print(' ');Serial.print("tarR:");Serial.println(tarR);
+  //Serial.print("curL:");Serial.print(curL);Serial.print(' ');Serial.print("curR:");Serial.println(curR);
+  //Serial.printf("tar Pos %ld %ld\r\n",tarA,tarB);
+  doMove(tarA, tarB);
+
   float dx = tarX - curX;
   float dy = tarY - curY;
   float distance = sqrt(dx*dx+dy*dy);
   Serial.print("distance=");Serial.println(distance);
   if (distance < 0.001)
     return;
-  tarA = tarX*STEPS_PER_MM;
-  tarB = tarY*STEPS_PER_MM;
-  //Serial.print("tarL:");Serial.print(tarL);Serial.print(' ');Serial.print("tarR:");Serial.println(tarR);
-  //Serial.print("curL:");Serial.print(curL);Serial.print(' ');Serial.print("curR:");Serial.println(curR);
-  //Serial.printf("tar Pos %ld %ld\r\n",tarA,tarB);
-  doMove();
   curX = tarX;
   curY = tarY;
 }
@@ -193,17 +201,18 @@ void goHome()
 //  Serial.println("goHome!");
   posA = 0;
   posB = 0;
+
   curX = 0;
   curY = 0;
   tarX = 0;
   tarY = 0;
   tarA = 0;
   tarB = 0;
+
 }
 
 void initPosition()
 {
-  curX=0; curY=0;
   posA = 0;posB = 0;
 }
 
@@ -213,16 +222,14 @@ void parseCordinate(char * cmd)
   char * tmp;
   char * str;
   str = strtok_r(cmd, " ", &tmp);
-  tarX = curX;
-  tarY = curY;
+  float tarX = steps2mm(posA);
+  float tarY = steps2mm(posB);
   while(str!=NULL){
     str = strtok_r(0, " ", &tmp);
     if(str[0]=='X'){
       tarX = atof(str+1);
     }else if(str[0]=='Y'){
       tarY = atof(str+1);
-    }else if(str[0]=='Z'){
-      tarZ = atof(str+1);
     }else if(str[0]=='F'){
       float speed = atof(str+1);
       tarSpd = speed/60; // mm/min -> mm/s
@@ -230,13 +237,16 @@ void parseCordinate(char * cmd)
       stepAuxDelay = atol(str+1);
     }
   }
+// TODO: Check
 //  Serial.print("tarX:");
 //  Serial.print(tarX);
 //  Serial.print(", tarY:");
 //  Serial.print(tarY);
 //  Serial.print(", stepAuxDelay:");
 //  Serial.println(stepAuxDelay);
-  prepareMove();
+  //Serial.print("G1 ");Serial.print(tarX);Serial.print(" ");Serial.println(tarY);
+  //prepareMove();
+  prepareMove(tarX, tarY);
 }
 
 void echoRobotSetup()
@@ -244,8 +254,8 @@ void echoRobotSetup()
   Serial.print("M10 XY ");
   Serial.print(roboSetup.data.width);Serial.print(' ');
   Serial.print(roboSetup.data.height);Serial.print(' ');
-  Serial.print(curX);Serial.print(' ');
-  Serial.print(curY);Serial.print(' ');
+  Serial.print(steps2mm(posA));Serial.print(' ');
+  Serial.print(steps2mm(posB));Serial.print(' ');
   Serial.print("A");Serial.print((int)roboSetup.data.motoADir);
   Serial.print(" B");Serial.print((int)roboSetup.data.motoBDir);
   Serial.print(" H");Serial.print((int)roboSetup.data.motorSwitch);
@@ -352,7 +362,7 @@ void parseMcode(char * cmd)
       break;
     case 5:
       parseRobotSetup(cmd);
-      break;      
+      break;
     case 10:
       echoRobotSetup();
       break;
@@ -372,23 +382,26 @@ void parseGcode(char * cmd)
       parseCordinate(cmd);
       break;
     case 28: // home
+
+      // From Here:
       stepAuxDelay = 0;
       tarX=0; tarY=0;
       servoPen.write(roboSetup.data.penUpPos);
       laser.run(0);
-      goHome();
-      break; 
+      // TODO: Check
+      // goHome();
+      break;
   }
 }
 
 void parseCmd(char * cmd)
 {
   if(cmd[0]=='G'){ // gcode
-    parseGcode(cmd+1);  
+    parseGcode(cmd+1);
   }else if(cmd[0]=='M'){ // mcode
     parseMcode(cmd+1);
   }else if(cmd[0]=='P'){
-    Serial.print("POS X");Serial.print(curX);Serial.print(" Y");Serial.println(curY);
+    Serial.print("POS X");Serial.print(steps2mm(posA));Serial.print(" Y");Serial.println(steps2mm(posB));
   }
   Serial.println("OK");
 }
@@ -453,7 +466,7 @@ void setup() {
   laser.run(0);
 }
 
-char buf[64];
+char cmd[64];
 int8_t bufindex;
 
 boolean process_serial(void)
@@ -481,11 +494,14 @@ boolean process_serial(void)
 void loop() {
   if(Serial.available()){
     char c = Serial.read();
-    buf[bufindex++]=c;
+
+    // TODO: Check
+    // buf[bufindex++]=c;
+    cmd[bufindex++]=c;
     if(c=='\n'){
-      buf[bufindex]='\0';              // Robbo1 2015/6/8 Add     - Null terminate the string - Essential for first use of 'buf' and good programming practice
-      parseCmd(buf);
-      memset(buf,0,64);
+      cmd[bufindex]='\0';              // Robbo1 2015/6/8 Add     - Null terminate the string - Essential for first use of 'buf' and good programming practice
+      parseCmd(cmd);
+      memset(cmd,0,64);
       bufindex = 0;
     }
     if(bufindex>=64){
